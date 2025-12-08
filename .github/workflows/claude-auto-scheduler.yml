@@ -23,13 +23,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # claude ラベルが付いた未クローズのIssueを最大3件取得
+          # claude-error ラベルが付いているものは除外（再試行を防ぐ）
           ISSUES=$(gh issue list \
             --repo ${{ github.repository }} \
             --label "claude" \
             --state open \
             --limit 3 \
-            --json number \
-            --jq '[.[].number]')
+            --json number,labels \
+            --jq '[.[] | select(.labels | map(.name) | contains(["claude-error"]) | not) | .number]')
 
           echo "Found issues: $ISSUES"
           echo "issues=$ISSUES" >> $GITHUB_OUTPUT
