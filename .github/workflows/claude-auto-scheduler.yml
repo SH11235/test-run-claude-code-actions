@@ -118,8 +118,34 @@ jobs:
             3. Create a pull request that addresses the issue
             4. Ensure the PR description references Issue #${{ matrix.issue }}
 
+      - name: Check for created PR
+        id: check-pr
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Issue に関連する PR を検索（最近 10 分以内に作成されたもの）
+          # Issueのbodyに #番号 が含まれているPRを探す
+          PR_URL=$(gh pr list \
+            --repo ${{ github.repository }} \
+            --search "in:body #${{ matrix.issue }}" \
+            --state open \
+            --limit 5 \
+            --json url,createdAt \
+            --jq 'sort_by(.createdAt) | reverse | .[0].url // ""')
+
+          if [ -n "$PR_URL" ]; then
+            echo "Found PR: $PR_URL"
+            echo "PR_URL=$PR_URL" >> $GITHUB_ENV
+            echo "pr_found=true" >> $GITHUB_OUTPUT
+          else
+            echo "No PR found for issue #${{ matrix.issue }}"
+            echo "PR_URL=" >> $GITHUB_ENV
+            echo "pr_found=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Update issue on success
-        if: success()
+        if: always() && steps.check-pr.outputs.pr_found == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -133,15 +159,17 @@ jobs:
             --repo ${{ github.repository }} \
             --add-label "pr-created"
 
-          # 成功コメントを追加
+          # 成功コメントを追加（PR リンク付き）
           gh issue comment ${{ matrix.issue }} \
             --repo ${{ github.repository }} \
             --body "✅ Claude Code has successfully processed this issue and created a pull request.
 
+          **Pull Request**: ${{ env.PR_URL }}
+
           Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
 
       - name: Update issue on failure
-        if: failure()
+        if: always() && steps.check-pr.outputs.pr_found == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -153,7 +181,12 @@ jobs:
           # エラーコメントを追加
           gh issue comment ${{ matrix.issue }} \
             --repo ${{ github.repository }} \
-            --body "❌ Claude Code encountered an error while processing this issue.
+            --body "❌ Claude Code processed this issue but did not create a pull request.
+
+          This could be due to:
+          - Permission issues
+          - Task complexity or ambiguity
+          - Technical errors during execution
 
           Please check the workflow run for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
