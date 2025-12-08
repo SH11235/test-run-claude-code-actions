@@ -23,14 +23,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # claude ラベルが付いた未クローズのIssueを取得
-          # claude-error ラベルが付いているものは除外し、最大3件まで処理
+          # claude-error または claude-pr-created ラベルが付いているものは除外し、最大3件まで処理
           ISSUES=$(gh issue list \
             --repo ${{ github.repository }} \
             --label "claude" \
             --state open \
             --limit 20 \
             --json number,labels \
-            --jq '[.[] | select(.labels | map(.name) | contains(["claude-error"]) | not) | .number] | .[0:3]')
+            --jq '[.[] | select(.labels | map(.name) | (contains(["claude-error"]) or contains(["claude-pr-created"])) | not) | .number] | .[0:3]')
 
           echo "Found issues: $ISSUES"
           echo "issues=$ISSUES" >> $GITHUB_OUTPUT
@@ -156,10 +156,10 @@ jobs:
             --repo ${{ github.repository }} \
             --remove-label "claude"
 
-          # pr-created ラベルを追加
+          # claude-pr-created ラベルを追加
           gh issue edit ${{ matrix.issue }} \
             --repo ${{ github.repository }} \
-            --add-label "pr-created"
+            --add-label "claude-pr-created"
 
           # 成功コメントを追加（PR リンク付き）
           gh issue comment ${{ matrix.issue }} \
