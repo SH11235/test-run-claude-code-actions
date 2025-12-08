@@ -145,10 +145,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # error ラベルを追加
+          # claude-error ラベルを追加
           gh issue edit ${{ matrix.issue }} \
             --repo ${{ github.repository }} \
-            --add-label "error"
+            --add-label "claude-error"
 
           # エラーコメントを追加
           gh issue comment ${{ matrix.issue }} \
