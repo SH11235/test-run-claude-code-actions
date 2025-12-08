@@ -1,0 +1,42 @@
+## Summary
+
+This PR adds a comprehensive README.md file to document the repository's purpose and workflows.
+
+## Changes
+
+- ✅ Created README.md with complete documentation
+- ✅ Documented repository purpose: Claude Code Actions testing with self-hosted runner
+- ✅ Explained `claude-auto-scheduler.yml` workflow:
+  - Scheduled automatic issue processing (3 times per night)
+  - Label-based system (`claude`, `pr-created`, `claude-error`)
+  - Automatic PR creation and issue updates
+- ✅ Explained `claude-code-self-hosted.yml` workflow:
+  - Manual `@claude` mention trigger
+  - Issue comment and body support
+- ✅ Documented disabled workflows:
+  - `claude.yml.disabled` (general-purpose Claude workflow)
+  - `claude-code-review.yml.disabled` (automated code review)
+- ✅ Included self-hosted runner setup instructions:
+  - Installation steps
+  - Configuration guide
+  - Service setup
+- ✅ Documented auto-scheduler feature usage:
+  - How to use the `claude` label
+  - Label lifecycle and meanings
+  - Monitoring results
+- ✅ Listed required secrets:
+  - `CLAUDE_CODE_OAUTH_TOKEN` configuration
+- ✅ Added troubleshooting section
+- ✅ Included resource links and documentation references
+
+## Related Issue
+
+Closes #2
+
+## Testing
+
+- Documentation has been reviewed for accuracy against actual workflow files
+- All workflow behaviors have been documented based on the code
+- Setup instructions follow GitHub's official runner installation process
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
