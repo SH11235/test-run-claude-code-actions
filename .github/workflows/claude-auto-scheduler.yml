@@ -100,6 +100,7 @@ jobs:
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: '--allowed-tools "Write" "Edit" "Read" "Glob" "Grep" "Bash(git:*)" "Bash(gh:*)" "Bash(ls:*)" "Bash(pwd:*)" "Bash(cd:*)" "Bash(echo:*)" "Bash(jq:*)"'
           prompt: |
             REPO: ${{ github.repository }}
             ISSUE NUMBER: ${{ matrix.issue }}
