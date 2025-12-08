@@ -1,0 +1,169 @@
+name: Claude Auto Scheduler
+
+on:
+  schedule:
+    # 深夜1時、3時、5時に実行 (UTC時刻なので日本時間-9時間)
+    # 日本時間 01:00 = UTC 16:00 (前日)
+    # 日本時間 03:00 = UTC 18:00 (前日)
+    # 日本時間 05:00 = UTC 20:00 (前日)
+    - cron: '0 16,18,20 * * *'
+  # 手動実行も可能にする
+  workflow_dispatch:
+
+jobs:
+  find-issues:
+    runs-on: self-hosted
+    outputs:
+      issues: ${{ steps.get-issues.outputs.issues }}
+      has-issues: ${{ steps.get-issues.outputs.has-issues }}
+    steps:
+      - name: Get issues with claude label
+        id: get-issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # claude ラベルが付いた未クローズのIssueを最大3件取得
+          ISSUES=$(gh issue list \
+            --repo ${{ github.repository }} \
+            --label "claude" \
+            --state open \
+            --limit 3 \
+            --json number \
+            --jq '[.[].number]')
+
+          echo "Found issues: $ISSUES"
+          echo "issues=$ISSUES" >> $GITHUB_OUTPUT
+
+          # Issueが存在するかチェック
+          if [ "$ISSUES" = "[]" ]; then
+            echo "has-issues=false" >> $GITHUB_OUTPUT
+            echo "No issues found with 'claude' label"
+          else
+            echo "has-issues=true" >> $GITHUB_OUTPUT
+          fi
+
+  process-issues:
+    needs: find-issues
+    if: needs.find-issues.outputs.has-issues == 'true'
+    runs-on: self-hosted
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    strategy:
+      matrix:
+        issue: ${{ fromJson(needs.find-issues.outputs.issues) }}
+      # 失敗しても他のIssueの処理を継続
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get issue details
+        id: issue-details
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Issue の詳細を取得
+          ISSUE_BODY=$(gh issue view ${{ matrix.issue }} \
+            --repo ${{ github.repository }} \
+            --json body \
+            --jq '.body')
+
+          ISSUE_TITLE=$(gh issue view ${{ matrix.issue }} \
+            --repo ${{ github.repository }} \
+            --json title \
+            --jq '.title')
+
+          echo "Processing Issue #${{ matrix.issue }}: $ISSUE_TITLE"
+
+          # 複数行対応のため環境ファイルに書き込み
+          {
+            echo 'ISSUE_BODY<<EOF'
+            echo "$ISSUE_BODY"
+            echo 'EOF'
+          } >> $GITHUB_ENV
+
+          {
+            echo 'ISSUE_TITLE<<EOF'
+            echo "$ISSUE_TITLE"
+            echo 'EOF'
+          } >> $GITHUB_ENV
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            ISSUE NUMBER: ${{ matrix.issue }}
+            ISSUE TITLE: ${{ env.ISSUE_TITLE }}
+
+            ISSUE BODY:
+            ${{ env.ISSUE_BODY }}
+
+            ---
+
+            Please complete the task described in the issue above and create a pull request.
+
+            Steps:
+            1. Read and understand the issue requirements
+            2. Implement the requested changes
+            3. Create a pull request that addresses the issue
+            4. Ensure the PR description references Issue #${{ matrix.issue }}
+
+      - name: Update issue on success
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # claude ラベルを削除
+          gh issue edit ${{ matrix.issue }} \
+            --repo ${{ github.repository }} \
+            --remove-label "claude"
+
+          # pr-created ラベルを追加
+          gh issue edit ${{ matrix.issue }} \
+            --repo ${{ github.repository }} \
+            --add-label "pr-created"
+
+          # 成功コメントを追加
+          gh issue comment ${{ matrix.issue }} \
+            --repo ${{ github.repository }} \
+            --body "✅ Claude Code has successfully processed this issue and created a pull request.
+
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+      - name: Update issue on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # error ラベルを追加
+          gh issue edit ${{ matrix.issue }} \
+            --repo ${{ github.repository }} \
+            --add-label "error"
+
+          # エラーコメントを追加
+          gh issue comment ${{ matrix.issue }} \
+            --repo ${{ github.repository }} \
+            --body "❌ Claude Code encountered an error while processing this issue.
+
+          Please check the workflow run for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          The \`claude\` label has been kept so this issue can be retried in the next scheduled run."
+
+      - name: Clean up node_modules
+        if: always()
+        run: |
+          ACTION_DIR="${RUNNER_WORKSPACE}/../_actions/anthropics/claude-code-action/v1"
+          if [ -d "$ACTION_DIR/node_modules" ]; then
+            echo "Removing node_modules only..."
+            rm -rf "$ACTION_DIR/node_modules"
+          fi
