@@ -1,0 +1,41 @@
+name: Claude Code Self-hosted Runner Test
+
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [opened]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
+    runs-on: self-hosted
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean up node_modules
+        if: always()
+        run: |
+          ACTION_DIR="${RUNNER_WORKSPACE}/../_actions/anthropics/claude-code-action/v1"
+          if [ -d "$ACTION_DIR/node_modules" ]; then
+            echo "Removing node_modules only..."
+            rm -rf "$ACTION_DIR/node_modules"
+          fi
