@@ -22,13 +22,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # claude ラベルが付いた未クローズのIssueを取得
+          # claude ラベルが付いた未クローズのIssueを取得（新しい順）
           # claude-error または claude-pr-created ラベルが付いているものは除外し、最大3件まで処理
           ISSUES=$(gh issue list \
             --repo ${{ github.repository }} \
             --label "claude" \
             --state open \
-            --limit 20 \
+            --limit 100 \
+            --order desc \
             --json number,labels \
             --jq '[.[] | select(.labels | map(.name) | (contains(["claude-error"]) or contains(["claude-pr-created"])) | not) | .number] | .[0:3]')
 
@@ -126,22 +127,40 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Issue に関連する PR を検索（最近 10 分以内に作成されたもの）
-          # Issueのbodyに #番号 が含まれているPRを探す
-          PR_URL=$(gh pr list \
-            --repo ${{ github.repository }} \
-            --search "in:body #${{ matrix.issue }}" \
-            --state open \
-            --limit 5 \
-            --json url,createdAt \
-            --jq 'sort_by(.createdAt) | reverse | .[0].url // ""')
+          # Issue に関連する PR を検索
+          # GitHub API のインデックス更新遅延に対応するため、リトライロジックを実装
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          PR_URL=""
+
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            echo "Searching for PR (attempt $((RETRY_COUNT + 1))/$MAX_RETRIES)..."
+
+            PR_URL=$(gh pr list \
+              --repo ${{ github.repository }} \
+              --search "in:body #${{ matrix.issue }}" \
+              --state open \
+              --limit 5 \
+              --json url,createdAt \
+              --jq 'sort_by(.createdAt) | reverse | .[0].url // ""')
+
+            if [ -n "$PR_URL" ]; then
+              echo "Found PR: $PR_URL"
+              break
+            fi
+
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            if [ $RETRY_COUNT -lt $MAX_RETRIES ]; then
+              echo "PR not found, retrying in 10 seconds..."
+              sleep 10
+            fi
+          done
 
           if [ -n "$PR_URL" ]; then
-            echo "Found PR: $PR_URL"
             echo "PR_URL=$PR_URL" >> $GITHUB_ENV
             echo "pr_found=true" >> $GITHUB_OUTPUT
           else
-            echo "No PR found for issue #${{ matrix.issue }}"
+            echo "No PR found for issue #${{ matrix.issue }} after $MAX_RETRIES attempts"
             echo "PR_URL=" >> $GITHUB_ENV
             echo "pr_found=false" >> $GITHUB_OUTPUT
           fi
@@ -164,11 +183,14 @@ jobs:
           # 成功コメントを追加（PR リンク付き）
           gh issue comment ${{ matrix.issue }} \
             --repo ${{ github.repository }} \
-            --body "✅ Claude Code has successfully processed this issue and created a pull request.
+            --body "$(cat <<'EOF'
+          ✅ Claude Code has successfully processed this issue and created a pull request.
 
           **Pull Request**: ${{ env.PR_URL }}
 
-          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EOF
+          )"
 
       - name: Update issue on failure
         if: always() && steps.check-pr.outputs.pr_found == 'false'
@@ -183,7 +205,8 @@ jobs:
           # エラーコメントを追加
           gh issue comment ${{ matrix.issue }} \
             --repo ${{ github.repository }} \
-            --body "❌ Claude Code processed this issue but did not create a pull request.
+            --body "$(cat <<'EOF'
+          ❌ Claude Code processed this issue but did not create a pull request.
 
           This could be due to:
           - Permission issues
@@ -192,7 +215,9 @@ jobs:
 
           Please check the workflow run for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 
-          The \`claude\` label has been kept so this issue can be retried in the next scheduled run."
+          The `claude` label has been kept so this issue can be retried in the next scheduled run.
+          EOF
+          )"
 
       - name: Clean up node_modules
         if: always()
